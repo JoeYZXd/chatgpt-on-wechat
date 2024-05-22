@@ -16,7 +16,7 @@ available_setting = {
     "open_ai_api_base": "https://api.openai.com/v1",
     "proxy": "",  # openai使用的代理
     # chatgpt模型， 当use_azure_chatgpt为true时，其名称为Azure上model deployment名称
-    "model": "gpt-3.5-turbo",  # 还支持 gpt-4, gpt-4-turbo, wenxin, xunfei, qwen
+    "model": "gpt-3.5-turbo",  # 还支持 gpt-4, gpt-4-turbo, wenxin, xunfei, qwen, coze
     "use_azure_chatgpt": False,  # 是否使用azure的chatgpt
     "azure_deployment_id": "",  # azure 模型部署名称
     "azure_api_version": "",  # azure api版本
@@ -164,6 +164,9 @@ available_setting = {
     "linkai_api_key": "",
     "linkai_app_code": "",
     "linkai_api_base": "https://api.link-ai.tech",  # linkAI服务地址
+    "use_coze": False,
+    "coze_api_key": "",
+    "coze_api_base": "https://api.coze.com/open_api/v2/chat",
 }
 
 
