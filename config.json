@@ -8,7 +8,7 @@
   "voice_to_text": "openai",
   "text_to_voice": "openai",
   "proxy": "",
-  "hot_reload": true,
+  "hot_reload": false,
   "single_chat_prefix": [""],
   "single_chat_reply_prefix": "[大款] ",
   "group_chat_prefix": [
