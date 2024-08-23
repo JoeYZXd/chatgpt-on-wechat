@@ -10,7 +10,7 @@
   "proxy": "",
   "hot_reload": false,
   "single_chat_prefix": [""],
-  "single_chat_reply_prefix": "[大款] ",
+  "single_chat_reply_prefix": "[小助手] ",
   "group_chat_prefix": [
     "@小助手"
   ],

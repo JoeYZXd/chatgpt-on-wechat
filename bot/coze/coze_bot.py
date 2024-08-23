@@ -1,18 +1,29 @@
 # encoding:utf-8
 import json
 import time
+import os
 import requests
 from bot.bot import Bot
+from bot.coze import chat_session
 from utils.redis_client import RedisClient
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from bot.coze.chat_session import ChatSession, ReplyMessage
+from requests_toolbelt import MultipartEncoder
 
 start_chat_url = "https://www.coze.cn/v3/chat"
 retrieve_chat_info_url = "https://www.coze.cn/v3/chat/retrieve"
 message_list_url = "https://www.coze.cn/v3/chat/message/list"
-feishu_bitable_add_record_url = ("https://open.feishu.cn/open-apis/bitable/v1/apps"
-                                 "/Jt1ob3uoQaddGhsESiFckV1cnAf/tables/tblK8whhkM9hBYD5/records")
+feishu_bitable_token = "Jt1ob3uoQaddGhsESiFckV1cnAf"
+feishu_bitable_table_id = "tblK8whhkM9hBYD5"
+feishu_bitable_add_record_url = ("https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/records"
+                                 .format(feishu_bitable_token, feishu_bitable_table_id))
+feishu_bitable_modify_record_url = ("https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/records/{}"
+                                    .format(feishu_bitable_token, feishu_bitable_table_id, "{}"))
+feishu_bitable_query_record_url = ("https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/records/search"
+                                   .format(feishu_bitable_token, feishu_bitable_table_id))
+feishu_upload_medias_url = "https://open.feishu.cn/open-apis/drive/v1/medias/upload_all"
 feishu_bot_app_id = "cli_a634401cb7fc500d"
 feishu_bot_app_secret = "HispFV8dn0tW24IUosYoFdfko4T7sToj"
 feishu_access_token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
@@ -33,6 +44,7 @@ data = {
 }
 
 redis_client = RedisClient()
+chats = {}
 
 
 def list_chat_message(chat_id, conversation_id):
@@ -68,6 +80,27 @@ def get_tenant_access_token():
     return str(tenant_access_token)
 
 
+def upload_snapshot(file_name, file_path):
+    token = get_tenant_access_token()
+    request_headers = {"Authorization": "Bearer " + token}
+    form = {"file_name": file_name,
+            "parent_type": "bitable_image",
+            "parent_node": feishu_bitable_token,
+            "size": str(os.path.getsize(file_path)),
+            "file": (open(file_path, 'rb'))}
+    multi_form = MultipartEncoder(form)
+    request_headers['Content-Type'] = multi_form.content_type
+    response = requests.post(feishu_upload_medias_url,
+                             headers=request_headers,
+                             data=multi_form)
+    if response.json().get("code") == 0:
+        file_token = response.json().get("data").get("file_token")
+        logger.info("[飞书] 上传截图成功, {}".format(file_token))
+        return file_token
+    else:
+        raise Exception("[飞书] 上传截图失败, " + response.json().get("msg"))
+
+
 def record_question(questioner, shop_name, question):
     logger.info("[飞书] 记录问题, {},  {}, {}".format(questioner, shop_name, question))
     token = get_tenant_access_token()
@@ -84,9 +117,65 @@ def record_question(questioner, shop_name, question):
                              headers=request_headers,
                              json={"fields": record})
     if response.json().get("code") == 0:
-        logger.info("[飞书] 新增记录成功")
+        record_id = response.json().get("data").get("record").get("record_id")
+        record = query_record(record_id)
+        logger.info("[飞书] 新增记录成功, {}".format(record))
+        return record
     else:
         raise Exception("新增记录失败, " + response.json().get("msg"))
+
+
+def query_record(record_id, page_token=None):
+    token = get_tenant_access_token()
+    request_headers = {"Authorization": "Bearer " + token,
+                       "Content-Type": "application/json; charset=utf-8"}
+    sort = [{
+        "field_name": "工单编号",
+        "desc": True
+    }]
+    response = requests.post(feishu_bitable_query_record_url + "?page_size=10" +
+                             ("&page_token=" + page_token if page_token is not None else ""),
+                             headers=request_headers,
+                             json={"sort": sort})
+    if response.json().get("code") == 0:
+        records = response.json().get("data").get("items")
+        for record in records:
+            if record.get("record_id") == record_id:
+                return record
+        if response.json().get("data").get("has_more"):
+            return query_record(record_id, response.json().get("data").get("page_token"))
+        else:
+            return None
+    else:
+        raise Exception("查询记录失败, " + response.json().get("msg"))
+
+
+def replenish_snapshot_of_question(work_order_id, snapshot):
+    token = get_tenant_access_token()
+    logger.info("[飞书] 获取访问令牌:{}".format(token))
+    request_headers = {"Authorization": "Bearer " + token,
+                       "Content-Type": "application/json; charset=utf-8"}
+    logger.info("截图消息:{}".format(snapshot))
+    snapshot.prepare()
+    file_token = upload_snapshot("test.jpg", snapshot.content)
+    response = requests.put(feishu_bitable_modify_record_url.format(work_order_id),
+                            headers=request_headers,
+                            json={"fields": {
+                                "问题附件": [{"file_token": file_token}]
+                            }})
+    logger.info("[飞书] 更新记录结果:{}".format(response.json()))
+    if response.json().get("code") == 0:
+        logger.info("[飞书] 更新记录成功}")
+        return Reply(ReplyType.TEXT, "小助手已记录该图片, 如果还有其它信息您可以继续补充")
+    else:
+        raise Exception("新增记录失败, " + response.json().get("msg"))
+
+
+def get_last_snapshot_message(chat: ChatSession):
+    for message in chat.messages:
+        if message.ctype == ContextType.IMAGE:
+            return message
+    return None
 
 
 class CozeBot(Bot):
@@ -95,17 +184,31 @@ class CozeBot(Bot):
 
     def reply(self, query, context=None):
         logger.info("[COZE] 收到消息={}".format(query))
-        shop_name = context.get('msg').from_user_nickname
-        questioner = context.get('msg').actual_user_nickname
+        chat_message = context.get('msg')
+        is_group = chat_message.is_group
+        if is_group:
+            group_id = chat_message.from_user_id
+            user_id = chat_message.actual_user_id
+            user_name = chat_message.actual_user_nickname
+            shop_name = chat_message.from_user_nickname
+        else:
+            group_id = None
+            user_id = chat_message.from_user_id
+            user_name = chat_message.from_user_nickname
+            shop_name = None
+        questioner = user_name
+        chat = chat_session.load_chat_by_message(group_id, user_id)
+        chat.add_message(chat_message)
         if context.type == ContextType.TEXT:
             logger.info("[COZE] query={}".format(query))
             reply = None
-            data["user_id"] = context.kwargs.get("msg").from_user_id
-            data["additional_messages"] = [{
-                "content": query,
-                "content_type": "text",
-                "role": "user"
-            }]
+            data["user_id"] = user_id
+            for message in chat.messages:
+                data["additional_messages"].append({
+                    "content": message.content,
+                    "content_type": "text",
+                    "role": "bot" if isinstance(message, ReplyMessage) else "user"
+                })
 
             response = requests.post(start_chat_url, headers=headers, json=data)
             if response.json()['code'] == 0:
@@ -114,20 +217,30 @@ class CozeBot(Bot):
                 if reply_chat.get('status') == 'in_progress':
                     reply_result = self.check_chat_status(reply_chat.get('id'), reply_chat.get('conversation_id'))
                     if reply_result.get("c") == 2:
-                        return Reply(ReplyType.TEXT, "您好，我是龙翊运营小助手，请留下您的问题，我会尽快处理")
+                        reply = Reply(ReplyType.TEXT, "您好，我是龙翊运营小助手，请留下您的问题，我会尽快处理")
                     elif reply_result.get("c") == 3:
-                        return Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
+                        reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
                     elif reply_result.get("c") == 1:
-                        record_question(questioner, shop_name, query)
-                        return Reply(ReplyType.TEXT, "您的问题已登记，本小助手会尽快解决，请稍等")
+                        record = record_question(questioner, shop_name, query)
+                        chat.work_order = record
+                        reply = Reply(ReplyType.TEXT, "您的问题已登记，本小助手会尽快解决，请稍等, 工单编号:{}"
+                                      .format(chat.work_order.get("fields").get("工单编号")))
+                    elif reply_result.get("c") == 4:
+                        # 获取图片消息,并将图片上传到工单
+                        message = get_last_snapshot_message(chat)
+                        reply = replenish_snapshot_of_question(chat.work_order.get("record_id"), message)
                     else:
-                        return Reply(ReplyType.TEXT, "不好意思，我不知道您在说什么，请换个方式提问")
+                        reply = Reply(ReplyType.TEXT, "不好意思，我不知道您在说什么，请换个方式提问")
             else:
                 logger.info("[COZE] response({})={}".format(response.json()['code'], response.json()['msg']))
-            return reply
+                reply = Reply(ReplyType.TEXT, "小助手头有点昏, 让我休息一下")
+        elif context.type == ContextType.IMAGE:
+            logger.info("[COZE] 收到图片")
+            reply = Reply(ReplyType.TEXT, "收到了一张图片, 为了更快的解决问题, 请确认该图片是否与您要解决的问题有关")
         else:
-            reply = Reply(ReplyType.ERROR, "Bot不支持处理{}类型的消息".format(context.type))
-            return reply
+            reply = Reply(ReplyType.ERROR, "小助手不支持处理{}类型的消息".format(context.type))
+        chat.add_message(ReplyMessage(chat.chat_id, user_id, reply.content, None))
+        return reply
 
     def check_chat_status(self, chat_id, conversation_id):
         time.sleep(1)
@@ -144,7 +257,12 @@ class CozeBot(Bot):
 
 
 def main():
-    record_question("Joey", "无锡爬山虎", "小程序无法约课")
+    file_path = "D:/Projects/chatgpt-on-wechat/tmp/240823-134102.png"
+    form = {"file_name": file_path,
+            "parent_type": "bitable_image",
+            "size": os.path.getsize(file_path),
+            "file": (open(file_path, 'rb'))}
+    multi_form = MultipartEncoder(form)
 
 
 if __name__ == "__main__":
