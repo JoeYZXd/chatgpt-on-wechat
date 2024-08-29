@@ -10,6 +10,7 @@ from common import const
 from config import load_config
 from plugins import *
 import threading
+import server.fei_shu_bot
 
 
 def sigterm_handler_wrap(_signo):
@@ -40,6 +41,10 @@ def start_channel(channel_name: str):
     channel.startup()
 
 
+def start_server():
+    threading.Thread(target=server.fei_shu_bot.run_server).start()
+
+
 def run():
     try:
         # load config
@@ -58,6 +63,7 @@ def run():
         if channel_name == "wxy":
             os.environ["WECHATY_LOG"] = "warn"
 
+        start_server()
         start_channel(channel_name)
 
         while True:

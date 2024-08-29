@@ -36,13 +36,6 @@ headers = {
     'Connection': 'keep-alive'
 }
 
-data = {
-    "bot_id": "7404342147061055507",
-    "stream": False,
-    "auto_save_history": True,
-    "additional_messages": []
-}
-
 redis_client = RedisClient()
 chats = {}
 
@@ -125,7 +118,7 @@ def record_question(questioner, shop_name, question):
         raise Exception("新增记录失败, " + response.json().get("msg"))
 
 
-def query_record(record_id, page_token=None):
+def query_record(record_id=None, page_token=None, create_time=None, user_name=None):
     token = get_tenant_access_token()
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
@@ -133,19 +126,50 @@ def query_record(record_id, page_token=None):
         "field_name": "工单编号",
         "desc": True
     }]
+    json_data = {"sort": sort}
+    if create_time is not None:
+        json_data["filter"] = {
+            "conjunction": "and",
+            "conditions": [
+                {
+                    "field_name": "创建时间",
+                    "operator": "is",
+                    "value": [
+                        "ExactDate",
+                        create_time
+                    ]
+                }
+            ]
+        }
+    if create_time is None and user_name is not None:
+        json_data["filter"] = {
+            "conjunction": "and",
+            "conditions": [
+                {
+                    "field_name": "操作人登入账号",
+                    "operator": "is",
+                    "value": [
+                        user_name
+                    ]
+                }
+            ]
+        }
     response = requests.post(feishu_bitable_query_record_url + "?page_size=10" +
                              ("&page_token=" + page_token if page_token is not None else ""),
                              headers=request_headers,
-                             json={"sort": sort})
+                             json=json_data)
     if response.json().get("code") == 0:
         records = response.json().get("data").get("items")
-        for record in records:
-            if record.get("record_id") == record_id:
-                return record
-        if response.json().get("data").get("has_more"):
-            return query_record(record_id, response.json().get("data").get("page_token"))
+        if record_id is not None:
+            for record in records:
+                if record.get("record_id") == record_id:
+                    return record
+            if response.json().get("data").get("has_more"):
+                return query_record(record_id, response.json().get("data").get("page_token"))
+            else:
+                return None
         else:
-            return None
+            return records[0]
     else:
         raise Exception("查询记录失败, " + response.json().get("msg"))
 
@@ -186,6 +210,12 @@ class CozeBot(Bot):
         logger.info("[COZE] 收到消息={}".format(query))
         chat_message = context.get('msg')
         is_group = chat_message.is_group
+        data = {
+            "bot_id": "7404342147061055507",
+            "stream": False,
+            "auto_save_history": True,
+            "additional_messages": []
+        }
         if is_group:
             group_id = chat_message.from_user_id
             user_id = chat_message.actual_user_id
@@ -210,6 +240,7 @@ class CozeBot(Bot):
                     "role": "bot" if isinstance(message, ReplyMessage) else "user"
                 })
 
+            logger.info("对话记录：{}".format(data["additional_messages"]))
             response = requests.post(start_chat_url, headers=headers, json=data)
             if response.json()['code'] == 0:
                 reply_chat = response.json()['data']
@@ -221,7 +252,7 @@ class CozeBot(Bot):
                     elif reply_result.get("c") == 3:
                         reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
                     elif reply_result.get("c") == 1:
-                        record = record_question(questioner, shop_name, query)
+                        record = record_question(questioner, user_id, shop_name, query)
                         chat.work_order = record
                         reply = Reply(ReplyType.TEXT, "您的问题已登记，本小助手会尽快解决，请稍等, 工单编号:{}"
                                       .format(chat.work_order.get("fields").get("工单编号")))
@@ -229,6 +260,32 @@ class CozeBot(Bot):
                         # 获取图片消息,并将图片上传到工单
                         message = get_last_snapshot_message(chat)
                         reply = replenish_snapshot_of_question(chat.work_order.get("record_id"), message)
+                    elif reply_result.get("c") == 6:
+                        # 查询进度
+                        if chat.work_order is None:
+                            record = query_record(None, None, None, user_name)
+                            if record is not None:
+                                chat.work_order = record
+                        else:
+                            record = query_record(chat.work_order.get("record_id"), None,
+                                                  chat.work_order.get("fields").get("创建时间"))
+                        if record is None:
+                            reply = Reply(ReplyType.TEXT, "报错，小助手没有找到您的工单，麻烦您把您的问题再发一遍")
+                        else:
+                            fields = record.get("fields")
+                            status = None
+                            charger = None
+                            solution = None
+                            if "处理状态" in fields:
+                                status = fields.get("处理状态")[0].get("text")
+                            if "工单负责人" in fields:
+                                charger = fields.get("工单负责人")[0].get("name")
+                            if "解决" in fields:
+                                solution = fields.get("解决")[0].get("text")
+                            reply = Reply(ReplyType.TEXT, ("当前问题处理状态：" + (status if status is not None else "处理中") +
+                                                           ", 工单负责人：" + (charger if status is not None else "等待分配") +
+                                                           ", 处理意见：" + (solution if solution is not None else "暂无") +
+                                                           "。您也可直接联系工单负责人询问具体情况"))
                     else:
                         reply = Reply(ReplyType.TEXT, "不好意思，我不知道您在说什么，请换个方式提问")
             else:
@@ -257,12 +314,14 @@ class CozeBot(Bot):
 
 
 def main():
-    file_path = "D:/Projects/chatgpt-on-wechat/tmp/240823-134102.png"
-    form = {"file_name": file_path,
-            "parent_type": "bitable_image",
-            "size": os.path.getsize(file_path),
-            "file": (open(file_path, 'rb'))}
-    multi_form = MultipartEncoder(form)
+    # file_path = "D:/Projects/chatgpt-on-wechat/tmp/240823-134102.png"
+    # form = {"file_name": file_path,
+    #         "parent_type": "bitable_image",
+    #         "size": os.path.getsize(file_path),
+    #         "file": (open(file_path, 'rb'))}
+    # multi_form = MultipartEncoder(form)
+    record = query_record(None, None, None, "Joey")
+    logger.info("查询结果:{}".format(record))
 
 
 if __name__ == "__main__":
