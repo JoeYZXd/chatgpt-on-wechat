@@ -8,7 +8,7 @@ pyttsx3>=2.90 # pytsx text to speech
 baidu_aip>=4.16.10 # baidu voice
 azure-cognitiveservices-speech # azure voice
 edge-tts # edge-tts
-numpy<=1.24.2
+numpy==1.26.4
 langid # language detect
 elevenlabs==1.0.3 # elevenlabs TTS
 
