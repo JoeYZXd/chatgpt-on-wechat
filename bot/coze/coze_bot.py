@@ -3,6 +3,8 @@ import json
 import time
 import os
 import requests
+from numpy.array_api import empty
+
 from bot.bot import Bot
 from bot.coze import chat_session
 from utils.redis_client import RedisClient
@@ -168,6 +170,8 @@ def query_record(record_id=None, page_token=None, create_time=None, user_name=No
                 return query_record(record_id, response.json().get("data").get("page_token"))
             else:
                 return None
+        elif records is None or not records:
+            return None
         else:
             return records[0]
     else:
