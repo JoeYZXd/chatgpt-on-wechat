@@ -3,11 +3,10 @@ import json
 import time
 import os
 import requests
-from numpy.array_api import empty
 
 from bot.bot import Bot
 from bot.coze import chat_session
-from utils.redis_client import RedisClient
+from server import fei_shu_api
 from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
@@ -26,9 +25,7 @@ feishu_bitable_modify_record_url = ("https://open.feishu.cn/open-apis/bitable/v1
 feishu_bitable_query_record_url = ("https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/records/search"
                                    .format(feishu_bitable_token, feishu_bitable_table_id))
 feishu_upload_medias_url = "https://open.feishu.cn/open-apis/drive/v1/medias/upload_all"
-feishu_bot_app_id = "cli_a634401cb7fc500d"
-feishu_bot_app_secret = "HispFV8dn0tW24IUosYoFdfko4T7sToj"
-feishu_access_token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+
 
 headers = {
     'authorization': 'Bearer pat_xjythCC1bvpqKtuSggwNPkb5XeItpk4NbghWA1PtFIhK6dMxhGRvIGy2FqF82QNe',
@@ -38,7 +35,6 @@ headers = {
     'Connection': 'keep-alive'
 }
 
-redis_client = RedisClient()
 chats = {}
 
 
@@ -57,26 +53,8 @@ def list_chat_message(chat_id, conversation_id):
         raise ValueError('获取消息列表失败')
 
 
-def get_tenant_access_token():
-    tenant_access_token = redis_client.get_str("FEISHU_TENANT_ACCESS_TOKEN")
-    if tenant_access_token is None:
-        response = requests.post(feishu_access_token_url, headers={"Content-Type": "application/json;charset=utf-8"},
-                                 json={"app_id": feishu_bot_app_id, "app_secret": feishu_bot_app_secret})
-        logger.info("[飞快]获取令牌:{}".format(response))
-        if response.json().get('code') == 0:
-            access_token = response.json().get("tenant_access_token")
-            if access_token is None:
-                raise ValueError("获取飞书接口令牌失败")
-            tenant_access_token = str(access_token)
-            logger.info("[飞书] 获取令牌:{}".format(tenant_access_token))
-            redis_client.get_client().set("FEISHU_TENANT_ACCESS_TOKEN", tenant_access_token, 110 * 60)
-        else:
-            raise ValueError("获取飞书接口令牌失败, " + response.json().get('msg'))
-    return str(tenant_access_token)
-
-
 def upload_snapshot(file_name, file_path):
-    token = get_tenant_access_token()
+    token = fei_shu_api.get_tenant_access_token()
     request_headers = {"Authorization": "Bearer " + token}
     form = {"file_name": file_name,
             "parent_type": "bitable_image",
@@ -98,7 +76,7 @@ def upload_snapshot(file_name, file_path):
 
 def record_question(questioner, shop_name, question):
     logger.info("[飞书] 记录问题, {},  {}, {}".format(questioner, shop_name, question))
-    token = get_tenant_access_token()
+    token = fei_shu_api.get_tenant_access_token()
     logger.info("[飞书] 获取访问令牌:{}".format(token))
     record = {
         "中心": shop_name,
@@ -121,7 +99,7 @@ def record_question(questioner, shop_name, question):
 
 
 def query_record(record_id=None, page_token=None, create_time=None, user_name=None):
-    token = get_tenant_access_token()
+    token = fei_shu_api.get_tenant_access_token()
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
     sort = [{
@@ -179,7 +157,7 @@ def query_record(record_id=None, page_token=None, create_time=None, user_name=No
 
 
 def replenish_snapshot_of_question(work_order_id, snapshot):
-    token = get_tenant_access_token()
+    token = fei_shu_api.get_tenant_access_token()
     logger.info("[飞书] 获取访问令牌:{}".format(token))
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
@@ -256,7 +234,7 @@ class CozeBot(Bot):
                     elif reply_result.get("c") == 3:
                         reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
                     elif reply_result.get("c") == 1:
-                        record = record_question(questioner, user_id, shop_name, query)
+                        record = record_question(questioner, shop_name, query)
                         chat.work_order = record
                         reply = Reply(ReplyType.TEXT, "您的问题已登记，本小助手会尽快解决，请稍等, 工单编号:{}"
                                       .format(chat.work_order.get("fields").get("工单编号")))

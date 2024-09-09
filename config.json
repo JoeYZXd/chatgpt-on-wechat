@@ -4,6 +4,7 @@
   "open_ai_api_key": "123456",
   "open_ai_api_base": "http://123.249.46.42:7077/v1",
   "claude_api_key": "YOUR API KEY",
+
   "text_to_image": "dall-e-2",
   "voice_to_text": "openai",
   "text_to_voice": "openai",
@@ -33,5 +34,10 @@
   "linkai_api_key": "",
   "linkai_app_code": "",
   "use_coze": true,
-  "coze_api_key": "pat_xjythCC1bvpqKtuSggwNPkb5XeItpk4NbghWA1PtFIhK6dMxhGRvIGy2FqF82QNe"
+  "coze_api_key": "pat_xjythCC1bvpqKtuSggwNPkb5XeItpk4NbghWA1PtFIhK6dMxhGRvIGy2FqF82QNe",
+  "feishu_port": 80,
+  "feishu_app_id": "cli_a634401cb7fc500d",
+  "feishu_app_secret": "HispFV8dn0tW24IUosYoFdfko4T7sToj",
+  "feishu_token": "",
+  "feishu_bot_name": ""
 }

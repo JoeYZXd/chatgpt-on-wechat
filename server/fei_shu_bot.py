@@ -10,7 +10,9 @@ def home():
 
 @app.route('/update-record', methods=["POST"])
 def update_record():
-    logger.info("收到更新请求".format(request))
+    work_order_id = request.args.get("work_order_id")
+    logger.info("收到更新请求, 工单号:{}".format(work_order_id))
+    return {}
 
 
 def run_server():
