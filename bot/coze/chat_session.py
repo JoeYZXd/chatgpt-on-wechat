@@ -1,4 +1,5 @@
 import uuid
+
 from common.log import logger
 
 from channel.chat_message import ChatMessage
@@ -9,6 +10,10 @@ chat_map = {}
 def get_chat(chat_id):
     global chat_map
     return chat_map.get(chat_id)
+
+def get_chats():
+    global chat_map
+    return chat_map
 
 
 def load_chat_by_message(group_id, user_id):

@@ -18,13 +18,11 @@ def get_tenant_access_token():
     if tenant_access_token is None:
         response = requests.post(feishu_access_token_url, headers={"Content-Type": "application/json;charset=utf-8"},
                                  json={"app_id": feishu_bot_app_id, "app_secret": feishu_bot_app_secret})
-        logger.info("[飞快]获取令牌:{}".format(response))
         if response.json().get('code') == 0:
             access_token = response.json().get("tenant_access_token")
             if access_token is None:
                 raise ValueError("获取飞书接口令牌失败")
             tenant_access_token = str(access_token)
-            logger.info("[飞书] 获取令牌:{}".format(tenant_access_token))
             redis_client.get_client().set("FEISHU_TENANT_ACCESS_TOKEN", tenant_access_token, 110 * 60)
         else:
             raise ValueError("获取飞书接口令牌失败, " + response.json().get('msg'))

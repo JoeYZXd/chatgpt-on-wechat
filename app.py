@@ -12,6 +12,7 @@ from plugins import *
 import threading
 import server.fei_shu_bot
 
+channel = None
 
 def sigterm_handler_wrap(_signo):
     old_handler = signal.getsignal(_signo)
@@ -27,6 +28,9 @@ def sigterm_handler_wrap(_signo):
 
 
 def start_channel(channel_name: str):
+    global channel
+    if channel is not None:
+        return
     channel = channel_factory.create_channel(channel_name)
     if channel_name in ["wx", "wxy", "terminal", "wechatmp", "wechatmp_service", "wechatcom_app", "wework",
                         const.FEISHU, const.DINGTALK]:

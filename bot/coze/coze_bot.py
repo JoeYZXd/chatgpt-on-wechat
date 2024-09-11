@@ -75,9 +75,7 @@ def upload_snapshot(file_name, file_path):
 
 
 def record_question(questioner, shop_name, question):
-    logger.info("[飞书] 记录问题, {},  {}, {}".format(questioner, shop_name, question))
     token = fei_shu_api.get_tenant_access_token()
-    logger.info("[飞书] 获取访问令牌:{}".format(token))
     record = {
         "中心": shop_name,
         "操作人登入账号": questioner,
@@ -85,14 +83,12 @@ def record_question(questioner, shop_name, question):
     }
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
-    logger.info("[飞书] 新增记录请求headers:{}".format(request_headers))
     response = requests.post(feishu_bitable_add_record_url,
                              headers=request_headers,
                              json={"fields": record})
     if response.json().get("code") == 0:
         record_id = response.json().get("data").get("record").get("record_id")
         record = query_record(record_id)
-        logger.info("[飞书] 新增记录成功, {}".format(record))
         return record
     else:
         raise Exception("新增记录失败, " + response.json().get("msg"))
@@ -158,10 +154,8 @@ def query_record(record_id=None, page_token=None, create_time=None, user_name=No
 
 def replenish_snapshot_of_question(work_order_id, snapshot):
     token = fei_shu_api.get_tenant_access_token()
-    logger.info("[飞书] 获取访问令牌:{}".format(token))
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
-    logger.info("截图消息:{}".format(snapshot))
     snapshot.prepare()
     file_token = upload_snapshot("test.jpg", snapshot.content)
     response = requests.put(feishu_bitable_modify_record_url.format(work_order_id),
@@ -169,9 +163,7 @@ def replenish_snapshot_of_question(work_order_id, snapshot):
                             json={"fields": {
                                 "问题附件": [{"file_token": file_token}]
                             }})
-    logger.info("[飞书] 更新记录结果:{}".format(response.json()))
     if response.json().get("code") == 0:
-        logger.info("[飞书] 更新记录成功}")
         return Reply(ReplyType.TEXT, "小助手已记录该图片, 如果还有其它信息您可以继续补充")
     else:
         raise Exception("新增记录失败, " + response.json().get("msg"))
@@ -189,7 +181,6 @@ class CozeBot(Bot):
         super().__init__()
 
     def reply(self, query, context=None):
-        logger.info("[COZE] 收到消息={}".format(query))
         chat_message = context.get('msg')
         is_group = chat_message.is_group
         data = {
@@ -212,7 +203,6 @@ class CozeBot(Bot):
         chat = chat_session.load_chat_by_message(group_id, user_id)
         chat.add_message(chat_message)
         if context.type == ContextType.TEXT:
-            logger.info("[COZE] query={}".format(query))
             reply = None
             data["user_id"] = user_id
             for message in chat.messages:
@@ -222,17 +212,18 @@ class CozeBot(Bot):
                     "role": "bot" if isinstance(message, ReplyMessage) else "user"
                 })
 
-            logger.info("对话记录：{}".format(data["additional_messages"]))
             response = requests.post(start_chat_url, headers=headers, json=data)
             if response.json()['code'] == 0:
                 reply_chat = response.json()['data']
-                logger.info("[COZE] response={}".format(reply_chat))
                 if reply_chat.get('status') == 'in_progress':
                     reply_result = self.check_chat_status(reply_chat.get('id'), reply_chat.get('conversation_id'))
                     if reply_result.get("c") == 2:
                         reply = Reply(ReplyType.TEXT, "您好，我是龙翊运营小助手，请留下您的问题，我会尽快处理")
                     elif reply_result.get("c") == 3:
-                        reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
+                        if reply_result.get("suggestion") is not None:
+                            reply = Reply(ReplyType.TEXT, reply_result.get("suggestion"))
+                        else:
+                            reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
                     elif reply_result.get("c") == 1:
                         record = record_question(questioner, shop_name, query)
                         chat.work_order = record
