@@ -17,22 +17,26 @@ def get_chats():
 
 
 def load_chat_by_message(group_id, user_id):
+    key = get_chat_tag(group_id, user_id)
+    if key in chat_map:
+        chat = chat_map[key]
+        logger.info("获取到会话{}:{}".format(key, chat))
+        return chat
+    else:
+        return ChatSession(key, group_id, user_id)
+
+def get_chat_tag(group_id, user_id):
     key = "{}-{}"
     if group_id is None:
         key = key.format("USER", user_id)
     else:
         key = key.format(group_id, user_id)
-    if key in chat_map:
-        chat = chat_map[key]
-        logger.info("获取到会话: {}".format(chat))
-        return chat
-    else:
-        return ChatSession(key, group_id, user_id)
-
+    return key
 
 class ChatSession(object):
     user_id = None
     chat_id = None
+    chat_tag = None
     messages = []
     work_order = None
 
@@ -41,6 +45,7 @@ class ChatSession(object):
         self.user_id = user_id
         self.group_id = group_id
         self.chat_id = uuid.uuid4()
+        self.chat_tag = chat_key
         chat_map[chat_key] = self
 
     def __str__(self):
@@ -48,7 +53,7 @@ class ChatSession(object):
             if isinstance(message, ReplyMessage):
                 logger.info("回复: {}".format(message.content))
             else:
-                logger.info("{}发送: {}".format(message.from_user_nickname, message.content))
+                logger.info("{}发送: {}".format(message.actual_user_nickname, message.content))
         return ""
 
     def add_message(self, message: ChatMessage):

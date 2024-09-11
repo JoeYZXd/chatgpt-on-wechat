@@ -2,7 +2,10 @@
 import json
 import time
 import os
+import uuid
+
 import requests
+from pydantic import UUID4
 
 from bot.bot import Bot
 from bot.coze import chat_session
@@ -74,12 +77,13 @@ def upload_snapshot(file_name, file_path):
         raise Exception("[飞书] 上传截图失败, " + response.json().get("msg"))
 
 
-def record_question(questioner, shop_name, question):
+def record_question(questioner, shop_name, question, chat_tag):
     token = fei_shu_api.get_tenant_access_token()
     record = {
         "中心": shop_name,
         "操作人登入账号": questioner,
-        "问题描述": question
+        "问题描述": question,
+        "AI会话标识": chat_tag
     }
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
@@ -152,19 +156,44 @@ def query_record(record_id=None, page_token=None, create_time=None, user_name=No
         raise Exception("查询记录失败, " + response.json().get("msg"))
 
 
-def replenish_snapshot_of_question(work_order_id, snapshot):
+def replenish_snapshot_of_question(work_order, snapshot):
+    work_order_id = work_order.get("record_id")
+    files = work_order.get("fields").get("问题附件")
+
     token = fei_shu_api.get_tenant_access_token()
     request_headers = {"Authorization": "Bearer " + token,
                        "Content-Type": "application/json; charset=utf-8"}
     snapshot.prepare()
-    file_token = upload_snapshot("test.jpg", snapshot.content)
+    file_token = upload_snapshot("file.jpg", snapshot.content)
+    if files is None:
+        files = [{"file_token": file_token}]
+    else:
+        files.append({"file_token": file_token})
     response = requests.put(feishu_bitable_modify_record_url.format(work_order_id),
                             headers=request_headers,
                             json={"fields": {
-                                "问题附件": [{"file_token": file_token}]
+                                "问题附件": files
                             }})
     if response.json().get("code") == 0:
+        work_order.get("fields")["问题附件"] = files
         return Reply(ReplyType.TEXT, "小助手已记录该图片, 如果还有其它信息您可以继续补充")
+    else:
+        raise Exception("新增记录失败, " + response.json().get("msg"))
+
+def replenish_of_question(work_order, message):
+    token = fei_shu_api.get_tenant_access_token()
+    question = work_order.get("fields").get("问题描述")[0].get("text")
+    question = question + "\n补充:" + message
+    request_headers = {"Authorization": "Bearer " + token,
+                       "Content-Type": "application/json; charset=utf-8"}
+    response = requests.put(feishu_bitable_modify_record_url.format(work_order.get("record_id")),
+                            headers=request_headers,
+                            json={"fields": {
+                                "问题描述": question
+                            }})
+    if response.json().get("code") == 0:
+        work_order.get("fields")["问题描述"][0]["text"] = question
+        return Reply(ReplyType.TEXT, "感谢您的补充, 这会给我们分析问题提供很大的帮助")
     else:
         raise Exception("新增记录失败, " + response.json().get("msg"))
 
@@ -224,16 +253,16 @@ class CozeBot(Bot):
                             reply = Reply(ReplyType.TEXT, reply_result.get("suggestion"))
                         else:
                             reply = Reply(ReplyType.TEXT, "不好意思，小助手正在全力解决问题，暂时没有时间闲聊，如有系统问题请留下您的问题")
-                    elif reply_result.get("c") == 1:
-                        record = record_question(questioner, shop_name, query)
+                    elif reply_result.get("c") == 1 and chat.work_order is None:
+                        record = record_question(questioner, shop_name, query, chat.chat_tag)
                         chat.work_order = record
                         reply = Reply(ReplyType.TEXT, "您的问题已登记，本小助手会尽快解决，请稍等, 工单编号:{}"
                                       .format(chat.work_order.get("fields").get("工单编号")))
-                    elif reply_result.get("c") == 4:
+                    elif reply_result.get("c") == 5:
                         # 获取图片消息,并将图片上传到工单
                         message = get_last_snapshot_message(chat)
-                        reply = replenish_snapshot_of_question(chat.work_order.get("record_id"), message)
-                    elif reply_result.get("c") == 6:
+                        reply = replenish_snapshot_of_question(chat.work_order, message)
+                    elif reply_result.get("c") == 7:
                         # 查询进度
                         if chat.work_order is None:
                             record = query_record(None, None, None, user_name)
@@ -259,6 +288,8 @@ class CozeBot(Bot):
                                                            ", 工单负责人：" + (charger if status is not None else "等待分配") +
                                                            ", 处理意见：" + (solution if solution is not None else "暂无") +
                                                            "。您也可直接联系工单负责人询问具体情况"))
+                    elif reply_result.get("c") == 8 or (reply_result.get("c") == 1 and chat.work_order is not None):
+                        reply = replenish_of_question(chat.work_order, query)
                     else:
                         reply = Reply(ReplyType.TEXT, "不好意思，我不知道您在说什么，请换个方式提问")
             else:
